@@ -59,7 +59,7 @@ namespace RoslynX
                     result.Lines.Add(line);
                     //Console.WriteLine(line);
 
-                    if (nextLineIsCsc)
+                    if (line.Contains("dotnet.exe exec", StringComparison.Ordinal))
                     {
                         nextLineIsCsc = false;
 
@@ -130,11 +130,11 @@ namespace RoslynX
                         continue;
                     }
 
-                    if (parts.Length > 1 && parts[0] == "Task " && parts[1] == "Csc")
-                    {
-                        nextLineIsCsc = true;
-                        continue;
-                    }
+                    // if (parts.Length > 1 && parts[0] == "Task " && parts[1].Contains("Csc"))
+                    // {
+                    //     nextLineIsCsc = true;
+                    //     continue;
+                    // }
                 }
 
                 if (proc.HasExited)

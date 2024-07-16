@@ -18,7 +18,7 @@ namespace Test
             var compiler = new Compiler();
             var projPath = Path.GetFullPath(@"..\..\..\..\TestHelloWorld\TestHelloWorld.csproj");
             var filePath = Path.GetFullPath(@"..\..\..\..\TestHelloWorld\Program.cs");
-            var resultPath = Path.GetFullPath(@"..\..\..\..\TestHelloWorld\bin\Debug\net6.0\TestHelloWorld.dll");
+            var resultPath = Path.GetFullPath(@"..\..\..\..\TestHelloWorld\bin\Debug\net7.0\TestHelloWorld.dll");
 
             var startInfo = new ProcessStartInfo
             {
@@ -52,13 +52,16 @@ namespace Test
                 proc.WaitForExit();
             }
             Console.WriteLine();
+            string outputDllPath = null;
             using (new Measurer("RoslynX First build"))
             {
-                compiler.BuildProject(projPath);
+                outputDllPath = compiler.BuildProject(projPath);
             }
             Console.WriteLine();
             var origText = File.ReadAllText(filePath);
             var srcText = origText;
+            
+
             for (int i = 0; i < 5; i++)
             {
                 var addText = $"\n public class TestClass_{i}_{DateTime.Now.Second} {{}}";
@@ -68,12 +71,12 @@ namespace Test
                 using (new Measurer("RoslynX Subsequent build " + i))
                 {
                     compiler.FileChanged(filePath);
-                    compiler.BuildProject(projPath);
+                    outputDllPath = compiler.BuildProject(projPath);
                 }
                 Console.WriteLine();
             }
 
-            var assembly = Assembly.LoadFile(resultPath);
+            var assembly = Assembly.LoadFile(outputDllPath);
             Console.WriteLine("Types found:");
             foreach (var type in assembly.GetTypes())
             {
