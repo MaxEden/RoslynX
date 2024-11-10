@@ -55,7 +55,7 @@ namespace Test
             string outputDllPath = null;
             using (new Measurer("RoslynX First build"))
             {
-                outputDllPath = compiler.BuildProject(projPath);
+                outputDllPath = compiler.BuildProject(projPath).TargetFile;
             }
             Console.WriteLine();
             var origText = File.ReadAllText(filePath);
@@ -71,7 +71,7 @@ namespace Test
                 using (new Measurer("RoslynX Subsequent build " + i))
                 {
                     compiler.FileChanged(filePath);
-                    outputDllPath = compiler.BuildProject(projPath);
+                    outputDllPath = compiler.BuildProject(projPath).TargetFile;
                 }
                 Console.WriteLine();
             }

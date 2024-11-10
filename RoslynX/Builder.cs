@@ -18,20 +18,24 @@ namespace RoslynX
             result.ProjectName = projectName;
             result.ProjectPath = path;
 
+            var outArgs = Helpers.GetArgsString(new string[]
+            {
+                "build",
+                path,
+                "--verbosity", "d",
+                "--configuration", "Debug",
+                //"--no-dependencies",
+                "--no-incremental"
+            });
+
+            Console.WriteLine("dotnet " + outArgs);
+
             var proc = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = "dotnet",
-                    Arguments = Helpers.GetArgsString(new string[]
-                    {
-                        "build",
-                        path,
-                        "--verbosity", "d",
-                        "--configuration", "Debug",
-                        "--no-dependencies",
-                        "--no-incremental"
-                    }),
+                    Arguments = outArgs,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -54,8 +58,8 @@ namespace RoslynX
                 if (!proc.StandardOutput.EndOfStream)
                 {
                     string line = proc.StandardOutput.ReadLine()?.Trim();
-                    if(line == null) continue;
-                    
+                    if (line == null) continue;
+
                     result.Lines.Add(line);
                     //Console.WriteLine(line);
 
@@ -146,21 +150,27 @@ namespace RoslynX
             var args = SplitArgs(result.CscString);
             var dir = Path.GetDirectoryName(result.ProjectPath) + "\\";
 
-            result.Sources = args
-                .Where(p => p.EndsWith(".cs"))
-                .Select(p => dir + p)
-                .ToArray();
+            result.Sources = GetSources(args, dir);
 
             foreach (var subResult in result.SubResults.Values)
             {
                 var subArgs = SplitArgs(subResult.CscString);
-                subResult.Sources = subArgs
-                    .Where(p => p.EndsWith(".cs"))
-                    .Select(p => dir + p)
-                    .ToArray();
+                subResult.Sources = GetSources(subArgs, dir);
             }
 
             return result;
+        }
+
+        private static string[] GetSources(IEnumerable<string> args, string dir)
+        {
+            var files = args.Where(p => p.EndsWith(".cs")).ToArray();
+
+            for (int i = 0; i < files.Length; i++)
+            {
+                if (!Path.IsPathFullyQualified(files[i])) files[i] = dir + files[i];
+            }
+
+            return files;
         }
 
 
@@ -171,10 +181,29 @@ namespace RoslynX
                 .Select(x => MetadataReference.CreateFromFile(x));
         }
 
-        public static IEnumerable<DocumentInfo> GetDocuments(BuildResult buildResult, ProjectId projectId)
+        public static IEnumerable<DocumentInfo> GetDocuments(BuildResult buildResult, ProjectId projectId,
+            Func<string, bool> excludeSource)
         {
-            return buildResult
-                .Sources.Where(File.Exists)
+            var filtered = new List<string>();
+
+            foreach (var source in buildResult.Sources)
+            {
+                if (excludeSource != null && excludeSource(source))
+                {
+                    Console.WriteLine($"Excluded: {Path.GetFileName(source)} Filtered");
+                    continue;
+                }
+
+                if (!File.Exists(source))
+                {
+                    Console.WriteLine($"Excluded: {source} File doesn't exist");
+                    continue;
+                }
+
+                filtered.Add(source);
+            }
+
+            return filtered
                 .Select(x => DocumentInfo.Create(
                     DocumentId.CreateNewId(projectId),
                     Path.GetFileName(x),
@@ -250,7 +279,7 @@ namespace RoslynX
             }
 
             if (started) yield return result.ToString();
-            }
+        }
     }
 
     public class BuildResult
@@ -258,15 +287,15 @@ namespace RoslynX
         public string ProjectPath;
         public string ProjectName;
 
-        public          string          CscString;
-        public          bool            Success;
-        public          string[]        Sources;
-        public          string[]        Constants;
+        public string CscString;
+        public bool Success;
+        public string[] Sources;
+        public string[] Constants;
         public readonly HashSet<string> References = new();
 
         public string OutputFilePath;
-        public int    OutputStart;
-        public int    OutputEnd;
+        public int OutputStart;
+        public int OutputEnd;
 
         public Dictionary<string, BuildResult> SubResults = new();
 
