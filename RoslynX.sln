@@ -9,8 +9,6 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RoslynX", "RoslynX\RoslynX.
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TestHelloWorld", "TestHelloWorld\TestHelloWorld.csproj", "{106B640F-1890-45F9-9B3F-FE7EE99A0F88}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoCompile", "AutoCompile\AutoCompile.csproj", "{D9685AE3-6594-456E-96DD-BD40515361DC}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -57,18 +55,6 @@ Global
 		{106B640F-1890-45F9-9B3F-FE7EE99A0F88}.Release|x64.Build.0 = Release|Any CPU
 		{106B640F-1890-45F9-9B3F-FE7EE99A0F88}.Release|x86.ActiveCfg = Release|Any CPU
 		{106B640F-1890-45F9-9B3F-FE7EE99A0F88}.Release|x86.Build.0 = Release|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Debug|x64.Build.0 = Debug|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Debug|x86.Build.0 = Debug|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Release|Any CPU.Build.0 = Release|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Release|x64.ActiveCfg = Release|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Release|x64.Build.0 = Release|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Release|x86.ActiveCfg = Release|Any CPU
-		{D9685AE3-6594-456E-96DD-BD40515361DC}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
