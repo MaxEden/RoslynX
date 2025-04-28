@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Emit;
 using Microsoft.CodeAnalysis.Text;
 
 namespace RoslynX
@@ -28,6 +29,10 @@ namespace RoslynX
             var _3 = typeof(Microsoft.CodeAnalysis.CSharp.Formatting.LabelPositionOptions);
         }
 
+        public bool RebuildAfterInitialization { get; set; } = false;
+        public bool WritePdb { get; set; } = true;
+        public bool AddCounter { get; set; } = false;
+
         public CompilerProjectInfo BuildProject(string path, string targetFile = null)
         {
             path = Path.GetFullPath(path);
@@ -36,48 +41,76 @@ namespace RoslynX
             {
                 var result = Builder.BuildAndAnalyze(path);
 
-                if (!result.Success)
-                {
-                    Console.WriteLine($"RoslynX: {Path.GetFileName(path)} has failed!");
-                    WriteDebugInfo(result);
-                    _projectInfos.Remove(path);
-                    return null;
-                }
+                ProcessResult(result);
+                if (!result.Success) return null;
 
-                AddResult(result);
-                foreach (var subResult in result.SubResults.Values)
+                if (!RebuildAfterInitialization)
                 {
-                    AddResult(subResult);
+                    var res = _projectInfos[path];
+                    return res;
                 }
             }
 
             pi = _projectInfos[path];
-            Prepare(pi);
-            if (pi.TargetFile == null) pi.TargetFile = targetFile;
-            if (pi.TargetFile == null) pi.TargetFile = pi.Proj.OutputFilePath;
+            if (pi.Success && pi.Version == _version)
+            {
+                return pi;
+            }
+
+            PrepareRoslyn(pi);
+
+            pi.TargetFile ??= targetFile;
+            pi.TargetFile ??= pi.Proj.OutputFilePath;
 
             var compilation = pi.Proj.GetCompilationAsync().Result;
 
-            using (var dll = File.Open(pi.TargetFile!, FileMode.OpenOrCreate, FileAccess.Write))
-            using (var pdb = File.Open(pi.SymbolFile, FileMode.OpenOrCreate, FileAccess.Write))
+            if (AddCounter)
             {
-                var result = compilation.Emit(dll, pdb);
-                bool built = true;
-                foreach (var diagnostic in result.Diagnostics)
-                {
-                    if (diagnostic.Severity == DiagnosticSeverity.Error)
-                    {
-                        built = false;
-                        Console.WriteLine(diagnostic.GetMessage());
-                    }
-                }
+                _counter++;
+                pi.TargetFile = pi.OriginalTargetFile.Replace(".dll", _counter + ".dll");
+            }
 
-                if (built)
+            EmitResult emitResult = default;
+
+
+            if (WritePdb)
+            {
+                using var dll = File.Open(pi.TargetFile, FileMode.Create, FileAccess.Write);
+                using var pdb = File.Open(pi.SymbolFile, FileMode.Create, FileAccess.Write);
+                emitResult = compilation.Emit(dll, pdb);
+            }
+            else
+            {
+                using var dll = File.Open(pi.TargetFile, FileMode.Create, FileAccess.Write);
+                emitResult = compilation.Emit(dll, null);
+            }
+
+
+            bool built = true;
+            foreach (var diagnostic in emitResult.Diagnostics)
+            {
+                if (diagnostic.Severity == DiagnosticSeverity.Error)
                 {
-                    Console.WriteLine("RoslynX ->" + pi.TargetFile);
-                    //Console.WriteLine("RoslynX ->" + pi.SymbolFile);
+                    if (built)
+                    {
+                        pi.Errors = new List<string>();
+                    }
+
+                    built = false;
+                    var msg = diagnostic.GetMessage();
+                    Console.WriteLine(msg);
+                    pi.Errors.Add(msg);
                 }
             }
+
+            pi.Success = built;
+
+            if (built)
+            {
+                Console.WriteLine("RoslynX ->" + pi.TargetFile);
+                //Console.WriteLine("RoslynX ->" + pi.SymbolFile);
+            }
+
 
             foreach (var reference in pi.Proj.AllProjectReferences)
             {
@@ -101,13 +134,41 @@ namespace RoslynX
             return pi;
         }
 
+        private static string GetFullClassName(ClassDeclarationSyntax classDeclaration)
+        {
+            // Get the namespace of the class
+            var namespaceDeclaration = classDeclaration.Ancestors()
+                .OfType<NamespaceDeclarationSyntax>()
+                .FirstOrDefault();
+
+            // Build the full name
+            var fullName = namespaceDeclaration != null
+                ? $"{namespaceDeclaration.Name}.{classDeclaration.Identifier.Text}"
+                : classDeclaration.Identifier.Text;
+
+            // If the class is within a partial class, it might be nested
+            var containingClass = classDeclaration.Ancestors()
+                .OfType<ClassDeclarationSyntax>()
+                .FirstOrDefault();
+
+            while (containingClass != null)
+            {
+                fullName = $"{containingClass.Identifier.Text}.{fullName}";
+                containingClass = containingClass.Ancestors()
+                    .OfType<ClassDeclarationSyntax>()
+                    .FirstOrDefault();
+            }
+
+            return fullName;
+        }
+
         private static void WriteDebugInfo(BuildResult result)
         {
             Console.WriteLine();
             foreach (var line in result.Lines)
             {
                 if (line.Contains(" error ", StringComparison.InvariantCultureIgnoreCase)
-                   || line.Contains(" failed", StringComparison.InvariantCultureIgnoreCase))
+                    || line.Contains(" failed", StringComparison.InvariantCultureIgnoreCase))
                 {
                     Console.WriteLine(line);
                 }
@@ -116,39 +177,51 @@ namespace RoslynX
             Console.WriteLine();
         }
 
-        private void AddResult(BuildResult result)
+        private void ProcessResult(BuildResult result)
         {
-            var pi = new CompilerProjectInfo()
+            if (result.Success)
             {
-                Path = result.ProjectPath,
-                Directory = Path.GetDirectoryName(result.ProjectPath),
-                BuildResult = result
-            };
-
-            //Console.WriteLine($"Result:{pi.path}");
-            _projectInfos[pi.Path] = pi;
-
-            foreach (var reference in result.References)
-            {
-                var name = Path.GetFileName(reference);
-                if (_stdLibs.Any(p => name.StartsWith(p))) continue;
-
-                if (!_refInfos.TryGetValue(reference, out var refInfo))
+                var pi = new CompilerProjectInfo()
                 {
-                    refInfo = new CompilerReferenceInfo();
-                    _refInfos[reference] = refInfo;
+                    Path = result.ProjectPath,
+                    Directory = Path.GetDirectoryName(result.ProjectPath),
+                    BuildResult = result
+                };
+
+                pi.Version = _version;
+                pi.Success = true;
+                pi.TargetFile = pi.BuildResult.OutputFilePath;
+                pi.OriginalTargetFile = pi.BuildResult.OutputFilePath;
+
+                //Console.WriteLine($"Result:{pi.path}");
+                _projectInfos[result.ProjectPath] = pi;
+
+                foreach (var reference in result.References)
+                {
+                    if (!_refInfos.TryGetValue(reference, out var refInfo))
+                    {
+                        refInfo = new CompilerReferenceInfo();
+                        _refInfos[reference] = refInfo;
+                    }
+
+                    //Console.WriteLine($"ref->{reference}");
+                    refInfo.ProjInfos.TryAdd(pi.Path, pi);
                 }
-                //Console.WriteLine($"ref->{reference}");
-                refInfo.ProjInfos.TryAdd(pi.Path, pi);
+            }
+            else
+            {
+                Console.WriteLine($"RoslynX: {Path.GetFileName(result.ProjectPath)} has failed!");
+                WriteDebugInfo(result);
+                _projectInfos.Remove(result.ProjectPath);
+            }
+
+            foreach (var subResult in result.SubResults)
+            {
+                ProcessResult(subResult.Value);
             }
         }
 
-        private readonly string[] _stdLibs = new string[]
-        {
-            "System", "Microsoft", "Windows", "netstandard", "mscorlib"
-        };
-
-        private void Prepare(CompilerProjectInfo pi)
+        private void PrepareRoslyn(CompilerProjectInfo pi)
         {
             if (pi.Ws != null) return;
 
@@ -170,6 +243,11 @@ namespace RoslynX
                 .WithDeterministic(cscString.Contains("/deterministic+"))
                 .WithAllowUnsafe(cscString.Contains("/unsafe+"));
 
+            var documents = Builder.GetDocuments(result, projectId, ExcludeSource).ToArray();
+            var metadataReferences = Builder.GetMetadataReferences(result).ToArray();
+            var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: result.Constants);
+            var outputFilePath = result.OutputFilePath;
+
             ProjectInfo projectInfo = ProjectInfo.Create(
                 projectId,
                 VersionStamp.Create(),
@@ -177,12 +255,12 @@ namespace RoslynX
                 result.ProjectName,
                 LanguageNames.CSharp,
                 filePath: path,
-                outputFilePath: result.OutputFilePath,
-                documents: Builder.GetDocuments(result, projectId, ExcludeSource),
+                outputFilePath: outputFilePath,
+                documents: documents,
                 projectReferences: Array.Empty<ProjectReference>(),
-                metadataReferences: Builder.GetMetadataReferences(result),
+                metadataReferences: metadataReferences,
                 analyzerReferences: Array.Empty<AnalyzerReference>(),
-                parseOptions: new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: result.Constants),
+                parseOptions: parseOptions,
                 compilationOptions: options);
 
             var proj = workspace.AddProject(projectInfo);
@@ -207,6 +285,7 @@ namespace RoslynX
 
         public void FileChanged(string path)
         {
+            _version++;
             if (_docInfos.TryGetValue(path, out var docInfo))
             {
                 var text = File.ReadAllText(path);
@@ -245,6 +324,8 @@ namespace RoslynX
 
         public Func<string, string> SourceToProject;
         public Func<string, bool> ExcludeSource;
+        private int _counter;
+        private int _version;
 
         public void ProjectChanged(string path)
         {
@@ -266,7 +347,7 @@ namespace RoslynX
                 var proj = projInfo.Proj;
                 if (proj == null) continue;
 
-                projInfo.Ws = null;//HACK
+                projInfo.Ws = null; //HACK
                 // var old = proj.MetadataReferences.FirstOrDefault(p => p.Display == path);
                 // if(old == null) continue;
                 //
@@ -274,6 +355,30 @@ namespace RoslynX
                 // var newRef = MetadataReference.CreateFromFile(path);
                 // proj = proj.AddMetadataReference(newRef);
                 //projInfo.proj = proj;
+            }
+        }
+
+        public void Invalidate()
+        {
+            _version++;
+        }
+
+        public void ResolveDocumentClassNames(CompilerProjectInfo projectInfo)
+        {
+            PrepareRoslyn(projectInfo);
+            foreach (var pair in _docInfos)
+            {
+                if (pair.Value.ProjInfo != projectInfo) continue;
+
+                var root = pair.Value.Doc.GetSyntaxRootAsync().Result;
+
+                var classDeclaration = root.DescendantNodes()
+                    .OfType<ClassDeclarationSyntax>().FirstOrDefault();
+
+                if (classDeclaration != null)
+                {
+                    pair.Value.FullTypeName = GetFullClassName(classDeclaration);
+                }
             }
         }
     }
@@ -284,16 +389,22 @@ namespace RoslynX
         public Project Proj;
         public string Directory;
         public string Path;
+        public string OriginalTargetFile;
         public string TargetFile;
         public string SymbolFile => TargetFile.Replace(".dll", ".pdb");
         public string OutputDirectory => System.IO.Path.GetDirectoryName(TargetFile);
+        public bool Success { get; internal set; }
+        public List<string> Errors { get; set; }
+        public int Version { get; set; }
+
         public BuildResult BuildResult;
     }
 
     public class CompilerDocumentInfo
     {
-        public Document Doc;
-        public CompilerProjectInfo ProjInfo;
+        public Document Doc { get; internal set; }
+        public CompilerProjectInfo ProjInfo { get; internal set; }
+        public string FullTypeName { get; internal set; }
     }
 
     public class CompilerReferenceInfo

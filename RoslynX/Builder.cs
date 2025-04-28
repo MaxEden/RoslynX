@@ -25,6 +25,9 @@ namespace RoslynX
                 "--verbosity", "d",
                 "--configuration", "Debug",
                 //"--no-dependencies",
+                //"--no-restore",
+                "--nologo",
+                //"--tl:off",
                 "--no-incremental"
             });
 
@@ -45,28 +48,33 @@ namespace RoslynX
 
             proc.ErrorDataReceived += (sender, args) =>
             {
+                result.Errors ??= new List<string>();
                 Console.WriteLine(args);
+                result.Errors.Add(args.Data);
                 result.Success = false;
             };
 
             proc.Start();
+            var text = proc.StandardOutput.ReadToEnd();
+            if (string.IsNullOrWhiteSpace(text)) return null;
+
+            var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+
 
             string proj = null;
-            bool nextLineIsCsc = false;
-            while (true)
+            foreach (var line1 in lines)
             {
-                if (!proc.StandardOutput.EndOfStream)
-                {
-                    string line = proc.StandardOutput.ReadLine()?.Trim();
-                    if (line == null) continue;
+                var line = line1;
+               {
+                    
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    line = line.Trim();
 
                     result.Lines.Add(line);
-                    //Console.WriteLine(line);
 
                     if (line.Contains("dotnet.exe exec", StringComparison.Ordinal))
                     {
-                        nextLineIsCsc = false;
-
                         BuildResult res = null;
                         if (result.ProjectPath == proj)
                         {
@@ -83,47 +91,65 @@ namespace RoslynX
                         }
 
                         res.CscString = line;
-                        //var args = SplitArgs(line);
 
                         var parts1 = line.Split(" /");
 
                         foreach (var part in parts1)
                         {
-                            if (part.StartsWith("define:"))
+                            if (part.StartsWith("define:", StringComparison.Ordinal))
                             {
                                 res.Constants = part.Substring("define:".Length).Split(';');
                             }
 
-                            if (part.StartsWith("reference:"))
+                            if (part.StartsWith("reference:", StringComparison.Ordinal))
                             {
-                                res.References.Add(part.Substring("reference:".Length));
+                                res.AddReference(part.Substring("reference:".Length));
                             }
 
-                            if (part.StartsWith("out:"))
+                            if (part.StartsWith("out:", StringComparison.Ordinal))
                             {
-                                res.OutputFilePath = part.Substring("out:".Length);
+                                res.SubResultOutFilePath = part.Substring("out:".Length);
                             }
                         }
-
-                        res.OutputStart = line.IndexOf(" /out:", StringComparison.Ordinal) + " /out:".Length;
-                        res.OutputEnd = line.IndexOf(" /", res.OutputStart, StringComparison.Ordinal);
-
+                        
                         continue;
                     }
 
-                    if (line.StartsWith(projectName))
+                    if (line.Contains("->", StringComparison.Ordinal))
                     {
-                        result.OutputFilePath = line.Split("->", StringSplitOptions.RemoveEmptyEntries)[1].Trim();
-                        result.Success = true;
-                        Console.WriteLine(line);
-                        continue;
+                        
+                        var splitArrow = line.Split("->", StringSplitOptions.RemoveEmptyEntries);
+                        if (splitArrow.Length == 2)
+                        {
+                            var projName = splitArrow[0].Trim();
+                            var dllPath = splitArrow[1].Trim();
+
+                            foreach (var subResult in result.SubResults.Values)
+                            {
+                                if (projName.Equals(subResult.ProjectName, StringComparison.Ordinal))
+                                {
+                                    subResult.OutputFilePath = dllPath;
+                                    subResult.Success = true;
+                                    Console.WriteLine(line);
+                                    break;
+                                }
+                            }
+
+                            if (projName.Equals(projectName, StringComparison.Ordinal))
+                            {
+                                result.OutputFilePath = dllPath;
+                                result.Success = true;
+                                Console.WriteLine(line);
+                                continue;
+                            }
+                        }
+                        
                     }
 
-                    if (line.StartsWith("Resolved file path is "))
+                    if (line.StartsWith("Resolved file path is ", StringComparison.Ordinal))
                     {
                         var reference = line.Split("\"", StringSplitOptions.RemoveEmptyEntries)[1].Trim();
-                        result.References.Add(reference);
-                        //Console.WriteLine(line);
+                        result.AddReference(reference);
                         continue;
                     }
 
@@ -139,11 +165,6 @@ namespace RoslynX
                     //     nextLineIsCsc = true;
                     //     continue;
                     // }
-                }
-
-                if (proc.HasExited)
-                {
-                    break;
                 }
             }
 
@@ -174,11 +195,18 @@ namespace RoslynX
         }
 
 
-        public static IEnumerable<MetadataReference> GetMetadataReferences(BuildResult result)
+        public static List<MetadataReference> GetMetadataReferences(BuildResult result)
         {
-            return result
-                .References.Where(File.Exists)
-                .Select(x => MetadataReference.CreateFromFile(x));
+            List<MetadataReference> refs = new();
+            foreach (var reference in result.References)
+            {
+                if (File.Exists(reference))
+                {
+                    refs.Add(MetadataReference.CreateFromFile(reference));
+                }
+            }
+
+            return refs;
         }
 
         public static IEnumerable<DocumentInfo> GetDocuments(BuildResult buildResult, ProjectId projectId,
@@ -218,8 +246,10 @@ namespace RoslynX
 
         //Mikescher
         //https://stackoverflow.com/questions/298830/split-string-containing-command-line-parameters-into-string-in-c-sharp/298968#298968
-        private static IEnumerable<string> SplitArgs(string commandLine)
+        private static List<string> SplitArgs(string commandLine)
         {
+            List<string> argsList = new();
+
             var result = new StringBuilder();
 
             var quoted = false;
@@ -267,7 +297,10 @@ namespace RoslynX
                 }
                 else if (chr == ' ' && !quoted)
                 {
-                    if (started) yield return result.ToString();
+                    if (started)
+                    {
+                        argsList.Add(result.ToString());
+                    }
                     result.Clear();
                     started = false;
                 }
@@ -278,7 +311,12 @@ namespace RoslynX
                 }
             }
 
-            if (started) yield return result.ToString();
+            if (started)
+            {
+                argsList.Add(result.ToString());
+            }
+
+            return argsList;
         }
     }
 
@@ -294,17 +332,29 @@ namespace RoslynX
         public readonly HashSet<string> References = new();
 
         public string OutputFilePath;
-        public int OutputStart;
-        public int OutputEnd;
 
         public Dictionary<string, BuildResult> SubResults = new();
 
         public readonly List<string> Lines = new();
+        public string SubResultOutFilePath;
+        public List<string> Errors { get; set; }
 
         public override string ToString()
         {
             if (ProjectPath == null) return base.ToString();
             return Path.GetFileName(ProjectPath);
+        }
+
+        private readonly string[] _stdLibs = new string[]
+        {
+            "System", "Microsoft", "Windows", "netstandard", "mscorlib"
+        };
+        public void AddReference(string reference)
+        {
+            reference = reference.Trim('"');
+            var name = Path.GetFileName(reference);
+            //if (_stdLibs.Any(p => name.StartsWith(p))) return;
+            References.Add(reference);
         }
     }
 }
