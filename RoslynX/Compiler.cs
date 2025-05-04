@@ -1,13 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Composition.Hosting;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Emit;
+using Microsoft.CodeAnalysis.Host;
+using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.Text;
 
 namespace RoslynX
@@ -32,8 +36,9 @@ namespace RoslynX
         public bool RebuildAfterInitialization { get; set; } = false;
         public bool WritePdb { get; set; } = true;
         public bool AddCounter { get; set; } = false;
+        public bool BuildInMemory { get; set; } = false;
 
-        public CompilerProjectInfo BuildProject(string path, string targetFile = null)
+        public CompilerProjectInfo BuildProject(string path, string outputFile = null)
         {
             path = Path.GetFullPath(path);
 
@@ -52,38 +57,67 @@ namespace RoslynX
             }
 
             pi = _projectInfos[path];
-            if (pi.Success && pi.Version == _version)
+            
+            if (pi.Success && pi.Version == _version && File.Exists(pi.OutputFile))
             {
                 return pi;
             }
 
             PrepareRoslyn(pi);
 
-            pi.TargetFile ??= targetFile;
-            pi.TargetFile ??= pi.Proj.OutputFilePath;
+            pi.OutputFile ??= outputFile;
+            pi.OutputFile ??= pi.Proj.OutputFilePath;
 
             var compilation = pi.Proj.GetCompilationAsync().Result;
 
             if (AddCounter)
             {
                 _counter++;
-                pi.TargetFile = pi.OriginalTargetFile.Replace(".dll", _counter + ".dll");
+                pi.OutputFile = pi.OriginalOutputFile.Replace(".dll", _counter + ".dll");
             }
 
+            var emitOptions = new EmitOptions(debugInformationFormat: DebugInformationFormat.PortablePdb);
             EmitResult emitResult = default;
 
-
-            if (WritePdb)
+            if (BuildInMemory)
             {
-                using var dll = File.Open(pi.TargetFile, FileMode.Create, FileAccess.Write);
-                using var pdb = File.Open(pi.SymbolFile, FileMode.Create, FileAccess.Write);
-                emitResult = compilation.Emit(dll, pdb);
+                if (WritePdb)
+                {
+                    var dll = pi.OutputStream;
+                    dll.Position=0;
+                    dll.SetLength(0);
+
+                    var pdb = pi.OutputSymbolStream;
+                    pdb.Position=0;
+                    pdb.SetLength(0);
+
+                    emitResult = compilation.Emit(dll, pdb, options: emitOptions);
+                }
+                else
+                {
+                    var dll = pi.OutputStream;
+                    dll.Position = 0;
+                    dll.SetLength(0);
+
+                    emitResult = compilation.Emit(dll, null);
+                }
             }
             else
             {
-                using var dll = File.Open(pi.TargetFile, FileMode.Create, FileAccess.Write);
-                emitResult = compilation.Emit(dll, null);
+                if (WritePdb)
+                {
+                    using var dll = File.Open(pi.OutputFile, FileMode.Create, FileAccess.Write);
+                    using var pdb = File.Open(pi.SymbolFile, FileMode.Create, FileAccess.Write);
+                    emitResult = compilation.Emit(dll, pdb, options: emitOptions);
+                }
+                else
+                {
+                    using var dll = File.Open(pi.OutputFile, FileMode.Create, FileAccess.Write);
+                    emitResult = compilation.Emit(dll, null);
+                }
             }
+
+            
 
 
             bool built = true;
@@ -107,7 +141,7 @@ namespace RoslynX
 
             if (built)
             {
-                Console.WriteLine("RoslynX ->" + pi.TargetFile);
+                Console.WriteLine("RoslynX ->" + pi.OutputFile);
                 //Console.WriteLine("RoslynX ->" + pi.SymbolFile);
             }
 
@@ -119,17 +153,17 @@ namespace RoslynX
 
                 if (!_projectInfos.TryGetValue(refPath, out var refInfo)) continue;
 
-                var outputDllPath = Path.Join(pi.OutputDirectory, Path.GetFileName(refInfo.TargetFile));
+                var outputDllPath = Path.Join(pi.OutputDirectory, Path.GetFileName(refInfo.OutputFile));
                 var outputPdbPath = Path.Join(pi.OutputDirectory, Path.GetFileName(refInfo.SymbolFile));
 
-                File.Copy(refInfo.TargetFile!, outputDllPath, true);
+                File.Copy(refInfo.OutputFile!, outputDllPath, true);
                 File.Copy(refInfo.SymbolFile!, outputPdbPath, true);
 
                 Console.WriteLine("RoslynX copy:" + outputDllPath);
                 //Console.WriteLine("RoslynX:" + outputPdbPath);
             }
 
-            ReferenceChanged(pi.TargetFile);
+            ReferenceChanged(pi.OutputFile);
 
             return pi;
         }
@@ -179,10 +213,11 @@ namespace RoslynX
 
         private void ProcessResult(BuildResult result)
         {
-            if (result.Success)
+            if (result.Success && File.Exists(result.OutputFilePath))
             {
                 var pi = new CompilerProjectInfo()
                 {
+                    Name = result.ProjectName,
                     Path = result.ProjectPath,
                     Directory = Path.GetDirectoryName(result.ProjectPath),
                     BuildResult = result
@@ -190,11 +225,33 @@ namespace RoslynX
 
                 pi.Version = _version;
                 pi.Success = true;
-                pi.TargetFile = pi.BuildResult.OutputFilePath;
-                pi.OriginalTargetFile = pi.BuildResult.OutputFilePath;
+                pi.OutputFile = pi.BuildResult.OutputFilePath;
+                pi.OriginalOutputFile = pi.BuildResult.OutputFilePath;
 
                 //Console.WriteLine($"Result:{pi.path}");
                 _projectInfos[result.ProjectPath] = pi;
+
+                if (BuildInMemory)
+                {
+                    {
+                        var memoryStream = new MemoryStream();
+                        var bytes = File.ReadAllBytes(result.OutputFilePath);
+                        memoryStream.Write(bytes);
+                        pi.OutputStream = memoryStream;
+                    }
+
+                    if (WritePdb)
+                    {
+                        var path = result.OutputFilePath.Substring(0, result.OutputFilePath.Length - 4) + ".pdb";
+                        if (File.Exists(path))
+                        {
+                            var symbolStream = new MemoryStream();
+                            var bytes = File.ReadAllBytes(path);
+                            symbolStream.Write(bytes);
+                            pi.OutputSymbolStream = symbolStream;
+                        }
+                    }
+                }
 
                 foreach (var reference in result.References)
                 {
@@ -213,12 +270,26 @@ namespace RoslynX
                 Console.WriteLine($"RoslynX: {Path.GetFileName(result.ProjectPath)} has failed!");
                 WriteDebugInfo(result);
                 _projectInfos.Remove(result.ProjectPath);
+                return;
             }
 
             foreach (var subResult in result.SubResults)
             {
                 ProcessResult(subResult.Value);
             }
+        }
+
+        public static HostServices CreateMinimalCSharpHostServices()
+        {
+            var csharpAssembly = typeof(CSharpCompilation).GetTypeInfo().Assembly;
+            var workspaceAssembly = typeof(Workspace).GetTypeInfo().Assembly;
+            var csharpWorkspacesAssembly = Assembly.Load("Microsoft.CodeAnalysis.CSharp.Workspaces");
+
+            // Create an array of assemblies that only contain the minimal services
+            var minimalAssemblies = new[] { csharpAssembly, workspaceAssembly, csharpWorkspacesAssembly };
+
+            // Create host services based solely on these assemblies.
+            return MefHostServices.Create(minimalAssemblies);
         }
 
         private void PrepareRoslyn(CompilerProjectInfo pi)
@@ -229,7 +300,9 @@ namespace RoslynX
 
             var path = result.ProjectPath;
 
-            var workspace = new AdhocWorkspace();
+            var host = CreateMinimalCSharpHostServices();
+
+            var workspace = new AdhocWorkspace(host);
 
             var projectId = ProjectId.CreateNewId();
 
@@ -242,7 +315,7 @@ namespace RoslynX
             var options = new CSharpCompilationOptions(outputKind)
                 .WithDeterministic(cscString.Contains("/deterministic+"))
                 .WithAllowUnsafe(cscString.Contains("/unsafe+"));
-
+            
             var documents = Builder.GetDocuments(result, projectId, ExcludeSource).ToArray();
             var metadataReferences = Builder.GetMetadataReferences(result).ToArray();
             var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: result.Constants);
@@ -385,19 +458,21 @@ namespace RoslynX
 
     public class CompilerProjectInfo
     {
-        public AdhocWorkspace Ws;
-        public Project Proj;
-        public string Directory;
-        public string Path;
-        public string OriginalTargetFile;
-        public string TargetFile;
-        public string SymbolFile => TargetFile.Replace(".dll", ".pdb");
-        public string OutputDirectory => System.IO.Path.GetDirectoryName(TargetFile);
+        public AdhocWorkspace Ws { get; internal set; }
+        public Project Proj { get; internal set; }
+        public string Directory { get; internal set; }
+        public string Path { get; internal set; }
+        public string OriginalOutputFile { get; internal set; }
+        public string OutputFile { get; internal set; }
+        public string SymbolFile => OutputFile.Replace(".dll", ".pdb");
+        public string OutputDirectory => System.IO.Path.GetDirectoryName(OutputFile);
         public bool Success { get; internal set; }
-        public List<string> Errors { get; set; }
-        public int Version { get; set; }
-
-        public BuildResult BuildResult;
+        public List<string> Errors { get; internal set; }
+        public int Version { get; internal set; }
+        public MemoryStream OutputStream { get; internal set; }
+        public MemoryStream OutputSymbolStream { get; internal set; }
+        public BuildResult BuildResult { get; internal set; }
+        public string Name { get; internal set; }
     }
 
     public class CompilerDocumentInfo
