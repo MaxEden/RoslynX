@@ -9,9 +9,9 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace RoslynX
 {
-    public class Builder
+    public class Builder: IBuilder
     {
-        public static BuildResult BuildAndAnalyze(string path)
+        public BuildResult BuildAndAnalyze(string path)
         {
             var projectName = Path.GetFileNameWithoutExtension(path);
             var result = new BuildResult();
@@ -193,7 +193,7 @@ namespace RoslynX
             return result;
         }
 
-        private static string[] GetSources(IEnumerable<string> args, string dir)
+        private string[] GetSources(IEnumerable<string> args, string dir)
         {
             var files = args.Where(p => p.EndsWith(".cs")).ToArray();
 
@@ -204,9 +204,8 @@ namespace RoslynX
 
             return files;
         }
-
-
-        public static List<MetadataReference> GetMetadataReferences(BuildResult result)
+        
+        public List<MetadataReference> GetMetadataReferences(BuildResult result)
         {
             List<MetadataReference> refs = new();
             foreach (var reference in result.References)
@@ -220,7 +219,7 @@ namespace RoslynX
             return refs;
         }
 
-        public static IEnumerable<DocumentInfo> GetDocuments(BuildResult buildResult, ProjectId projectId,
+        public IEnumerable<DocumentInfo> GetDocuments(BuildResult buildResult, ProjectId projectId,
             Func<string, bool> excludeSource)
         {
             var filtered = new List<string>();
@@ -253,8 +252,7 @@ namespace RoslynX
                             x)),
                     filePath: x));
         }
-
-
+        
         //Mikescher
         //https://stackoverflow.com/questions/298830/split-string-containing-command-line-parameters-into-string-in-c-sharp/298968#298968
         private static List<string> SplitArgs(string commandLine)
@@ -329,6 +327,13 @@ namespace RoslynX
 
             return argsList;
         }
+    }
+
+    public interface IBuilder
+    {
+        BuildResult BuildAndAnalyze(string path);
+        IEnumerable<DocumentInfo> GetDocuments(BuildResult result, ProjectId projectId, Func<string, bool> excludeSource);
+        List<MetadataReference> GetMetadataReferences(BuildResult result);
     }
 
     public class BuildResult

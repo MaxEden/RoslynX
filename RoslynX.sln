@@ -9,6 +9,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RoslynX", "RoslynX\RoslynX.
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TestHelloWorld", "TestHelloWorld\TestHelloWorld.csproj", "{106B640F-1890-45F9-9B3F-FE7EE99A0F88}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoslynX.MsBuild", "RoslynX.MsBuild\RoslynX.MsBuild.csproj", "{EA48373B-1F19-4144-97F7-F8FC219E2141}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{106B640F-1890-45F9-9B3F-FE7EE99A0F88}.Release|x64.Build.0 = Release|Any CPU
 		{106B640F-1890-45F9-9B3F-FE7EE99A0F88}.Release|x86.ActiveCfg = Release|Any CPU
 		{106B640F-1890-45F9-9B3F-FE7EE99A0F88}.Release|x86.Build.0 = Release|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Debug|x64.Build.0 = Debug|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Debug|x86.Build.0 = Debug|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Release|x64.ActiveCfg = Release|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Release|x64.Build.0 = Release|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Release|x86.ActiveCfg = Release|Any CPU
+		{EA48373B-1F19-4144-97F7-F8FC219E2141}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

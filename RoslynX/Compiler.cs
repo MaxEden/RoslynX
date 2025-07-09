@@ -25,11 +25,14 @@ namespace RoslynX
         public IReadOnlyDictionary<string, CompilerDocumentInfo> DocInfos => _docInfos;
         public IReadOnlyDictionary<string, CompilerReferenceInfo> RefInfos => _refInfos;
 
-        public Compiler()
+        public Compiler(IBuilder builder = null)
         {
             var _1 = typeof(Microsoft.CodeAnalysis.CSharp.Formatting.CSharpFormattingOptions);
             //var _2 = typeof(Microsoft.CodeAnalysis.MSBuild.ProjectMap);
             var _3 = typeof(Microsoft.CodeAnalysis.CSharp.Formatting.LabelPositionOptions);
+
+            _builder = builder;
+            _builder ??= new Builder();
         }
 
         public bool RebuildAfterInitialization { get; set; } = false;
@@ -43,7 +46,7 @@ namespace RoslynX
 
             if (!_projectInfos.TryGetValue(path, out var pi))
             {
-                var result = Builder.BuildAndAnalyze(path);
+                var result = _builder.BuildAndAnalyze(path);
 
                 ProcessResult(result);
                 if (!result.Success) return new CompilerProjectInfo()
@@ -325,8 +328,8 @@ namespace RoslynX
                 .WithDeterministic(cscString.Contains("/deterministic+"))
                 .WithAllowUnsafe(cscString.Contains("/unsafe+"));
             
-            var documents = Builder.GetDocuments(result, projectId, ExcludeSource).ToArray();
-            var metadataReferences = Builder.GetMetadataReferences(result).ToArray();
+            var documents = _builder.GetDocuments(result, projectId, ExcludeSource).ToArray();
+            var metadataReferences = _builder.GetMetadataReferences(result).ToArray();
             var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: result.Constants);
             var outputFilePath = result.OutputFilePath;
 
@@ -408,6 +411,7 @@ namespace RoslynX
         public Func<string, bool> ExcludeSource;
         private int _counter;
         private int _version;
+        private readonly IBuilder _builder;
 
         public void ProjectChanged(string path)
         {
@@ -464,6 +468,8 @@ namespace RoslynX
             }
         }
     }
+
+
 
     public class CompilerProjectInfo
     {
