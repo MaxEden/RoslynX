@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Composition.Hosting;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -47,7 +46,15 @@ namespace RoslynX
                 var result = Builder.BuildAndAnalyze(path);
 
                 ProcessResult(result);
-                if (!result.Success) return null;
+                if (!result.Success) return new CompilerProjectInfo()
+                {
+                    Name = result.ProjectName,
+                    Path = result.ProjectPath,
+                    Directory = Path.GetDirectoryName(result.ProjectPath),
+                    Success = false,
+                    Errors = result.Errors.ToList(),
+                    BuildResult = result,
+                };
 
                 if (!RebuildAfterInitialization)
                 {
@@ -205,6 +212,8 @@ namespace RoslynX
                     || line.Contains(" failed", StringComparison.InvariantCultureIgnoreCase))
                 {
                     Console.WriteLine(line);
+                    result.Errors ??= new List<string>();
+                    result.Errors.Add(line);
                 }
             }
 

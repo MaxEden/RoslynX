@@ -66,21 +66,28 @@ namespace RoslynX
             foreach (var line1 in lines)
             {
                 var line = line1;
-               {
-                    
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    line = line.Trim();
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                line = line.Trim();
 
-                    result.Lines.Add(line);
+                result.Lines.Add(line);
 
-                    if (line.Contains("dotnet.exe exec", StringComparison.Ordinal))
+                if (line.Contains(" error ", StringComparison.Ordinal))
+                {
+                    result.Errors ??= new();
+                    result.Errors.Add(line);
+                    continue;
+                }
+
+                if (line.Contains("dotnet.exe exec", StringComparison.Ordinal))
+                {
+                    BuildResult res = null;
+                    if (result.ProjectPath == proj)
                     {
-                        BuildResult res = null;
-                        if (result.ProjectPath == proj)
-                        {
-                            res = result;
-                        }
-                        else
+                        res = result;
+                    }
+                    else
+                    {
+                        if (!result.SubResults.TryGetValue(proj, out res))
                         {
                             res = new BuildResult()
                             {
@@ -89,94 +96,98 @@ namespace RoslynX
                             };
                             result.SubResults.Add(proj, res);
                         }
+                    }
 
-                        res.CscString = line;
+                    res.CscString = line;
 
-                        var parts1 = line.Split(" /");
+                    var parts1 = line.Split(" /");
 
-                        foreach (var part in parts1)
+                    foreach (var part in parts1)
+                    {
+                        if (part.StartsWith("define:", StringComparison.Ordinal))
                         {
-                            if (part.StartsWith("define:", StringComparison.Ordinal))
-                            {
-                                res.Constants = part.Substring("define:".Length).Split(';');
-                            }
-
-                            if (part.StartsWith("reference:", StringComparison.Ordinal))
-                            {
-                                res.AddReference(part.Substring("reference:".Length));
-                            }
-
-                            if (part.StartsWith("out:", StringComparison.Ordinal))
-                            {
-                                res.SubResultOutFilePath = part.Substring("out:".Length);
-                            }
+                            res.Constants = part.Substring("define:".Length).Split(';');
                         }
-                        
-                        continue;
-                    }
 
-                    if (line.Contains("->", StringComparison.Ordinal))
-                    {
-                        
-                        var splitArrow = line.Split("->", StringSplitOptions.RemoveEmptyEntries);
-                        if (splitArrow.Length == 2)
+                        if (part.StartsWith("reference:", StringComparison.Ordinal))
                         {
-                            var projName = splitArrow[0].Trim();
-                            var dllPath = splitArrow[1].Trim();
-
-                            foreach (var subResult in result.SubResults.Values)
-                            {
-                                if (projName.Equals(subResult.ProjectName, StringComparison.Ordinal))
-                                {
-                                    subResult.OutputFilePath = dllPath;
-                                    subResult.Success = true;
-                                    Console.WriteLine(line);
-                                    break;
-                                }
-                            }
-
-                            if (projName.Equals(projectName, StringComparison.Ordinal))
-                            {
-                                result.OutputFilePath = dllPath;
-                                result.Success = true;
-                                Console.WriteLine(line);
-                                continue;
-                            }
+                            res.AddReference(part.Substring("reference:".Length));
                         }
-                        
+
+                        if (part.StartsWith("out:", StringComparison.Ordinal))
+                        {
+                            res.SubResultOutFilePath = part.Substring("out:".Length);
+                        }
                     }
 
-                    if (line.StartsWith("Resolved file path is ", StringComparison.Ordinal))
-                    {
-                        var reference = line.Split("\"", StringSplitOptions.RemoveEmptyEntries)[1].Trim();
-                        result.AddReference(reference);
-                        continue;
-                    }
-
-                    var parts = line.Split('>', '\"');
-                    if (parts.Length > 2 && parts[2] == "CoreCompile" && parts.Length > 6)
-                    {
-                        proj = parts[6];
-                        continue;
-                    }
-
-                    // if (parts.Length > 1 && parts[0] == "Task " && parts[1].Contains("Csc"))
-                    // {
-                    //     nextLineIsCsc = true;
-                    //     continue;
-                    // }
+                    continue;
                 }
+
+                if (line.Contains("->", StringComparison.Ordinal))
+                {
+
+                    var splitArrow = line.Split("->", StringSplitOptions.RemoveEmptyEntries);
+                    if (splitArrow.Length == 2)
+                    {
+                        var projName = splitArrow[0].Trim();
+                        var dllPath = splitArrow[1].Trim();
+
+                        foreach (var subResult in result.SubResults.Values)
+                        {
+                            if (projName.Equals(subResult.ProjectName, StringComparison.Ordinal))
+                            {
+                                subResult.OutputFilePath = dllPath;
+                                subResult.Success = true;
+                                Console.WriteLine(line);
+                                break;
+                            }
+                        }
+
+                        if (projName.Equals(projectName, StringComparison.Ordinal))
+                        {
+                            result.OutputFilePath = dllPath;
+                            result.Success = true;
+                            Console.WriteLine(line);
+                            continue;
+                        }
+                    }
+
+                }
+
+                if (line.StartsWith("Resolved file path is ", StringComparison.Ordinal))
+                {
+                    var reference = line.Split("\"", StringSplitOptions.RemoveEmptyEntries)[1].Trim();
+                    result.AddReference(reference);
+                    continue;
+                }
+
+                var parts = line.Split('>', '\"');
+                if (parts.Length > 2 && parts[2] == "CoreCompile" && parts.Length > 6)
+                {
+                    proj = parts[6];
+                    continue;
+                }
+
+                // if (parts.Length > 1 && parts[0] == "Task " && parts[1].Contains("Csc"))
+                // {
+                //     nextLineIsCsc = true;
+                //     continue;
+                // }
             }
 
-            var args = SplitArgs(result.CscString);
-            var dir = Path.GetDirectoryName(result.ProjectPath) + "\\";
 
-            result.Sources = GetSources(args, dir);
 
-            foreach (var subResult in result.SubResults.Values)
+            if (result.Success)
             {
-                var subArgs = SplitArgs(subResult.CscString);
-                subResult.Sources = GetSources(subArgs, dir);
+                var args = SplitArgs(result.CscString);
+                var dir = Path.GetDirectoryName(result.ProjectPath) + "\\";
+                result.Sources = GetSources(args, dir);
+
+                foreach (var subResult in result.SubResults.Values)
+                {
+                    var subArgs = SplitArgs(subResult.CscString);
+                    subResult.Sources = GetSources(subArgs, dir);
+                }
             }
 
             return result;
@@ -345,7 +356,7 @@ namespace RoslynX
             return Path.GetFileName(ProjectPath);
         }
 
-        private readonly string[] _stdLibs = new string[]
+        private static readonly string[] _stdLibs = new string[]
         {
             "System", "Microsoft", "Windows", "netstandard", "mscorlib"
         };
